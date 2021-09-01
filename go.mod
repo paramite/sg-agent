@@ -4,5 +4,5 @@ go 1.15
 
 require (
 	github.com/infrawatch/apputils v0.0.0-20210809211320-3573b2937d14
-	github.com/infrawatch/sg-core v0.0.0-20210817084953-32f7abf85b8b
+	github.com/infrawatch/sg-core v0.0.0-20210908134219-cbc2915ea6e5
 )

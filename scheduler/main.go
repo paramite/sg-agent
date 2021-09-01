@@ -37,7 +37,7 @@ func requestExec(ts *TaskScheduler, task *lib.TaskRequest) {
 	ts.emit(event)
 
 	ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": task})
-	ts.logger.Debug("task execution request emited")
+	ts.logger.Debug("task execution request emitted")
 }
 
 // TaskScheduler plugin saves events to Elasticsearch database
@@ -68,6 +68,10 @@ func (ts *TaskScheduler) ReceiveEvent(event data.Event) {
 	switch event.Type {
 	case data.RESULT:
 		// TODO: React on task result
+	case data.LOG:
+		// NOTE: Do not react on own emits
+	case data.TASK:
+		// NOTE: ditto
 	default:
 		ts.logger.Metadata(logging.Metadata{"plugin": appname, "event": event})
 		ts.logger.Debug("received unknown event")
@@ -94,7 +98,12 @@ func (ts *TaskScheduler) Run(ctx context.Context, done chan bool) {
 		case req, _ := <-scheduleQueue:
 			if ts.conf.LogActions {
 				record := lib.CreateLogEvent(ts.conf.LogIndexPrefix, appname, req)
-				ts.emit(*record)
+				if record != nil {
+					ts.emit(*record)
+				} else {
+					ts.logger.Metadata(logging.Metadata{"plugin": appname, "request": req})
+					ts.logger.Warn("failed format log record from execution request")
+				}
 			}
 			ts.logger.Metadata(logging.Metadata{"plugin": appname, "request": req})
 			ts.logger.Debug("task execution request sent")
@@ -120,13 +129,18 @@ func (ts *TaskScheduler) Config(c []byte) error {
 
 	// register each task to a schedule
 	for _, task := range ts.conf.Schedule {
-		ts.schedule.RegisterTask(task.Name, task.Interval, 0,
+		data := task
+		err := ts.schedule.RegisterTask(data.Name, data.Interval, 0,
 			func(ctx context.Context, log *logging.Logger) (interface{}, error) {
-				requestExec(ts, &task)
-				ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": task})
+				requestExec(ts, &data)
+				ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": data})
 				ts.logger.Debug("task execution requested")
-				return task, nil
+				return data, nil
 			})
+		if err != nil {
+			ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": data})
+			ts.logger.Debug("failed to register task execution")
+		}
 	}
 
 	return nil

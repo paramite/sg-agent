@@ -1,0 +1,32 @@
+name: Integration testing
+env:
+  PROJECT_ROOT: /root/go/src/github.com/infrawatch/sg-agent
+
+  TEST_IMAGE: registry.access.redhat.com/ubi8
+
+on: push
+
+jobs:
+  scheduler:
+    name: "test scheduler"
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Check if sg-core repository has same topic branch
+        id: core_branch
+        continue-on-error: true
+        run: |
+          git ls-remote --exit-code --heads https://github.com/infrawatch/sg-core.git "$(echo ${GITHUB_REF#refs/heads/})"
+      - name: Check if apputils repository has same topic branch
+        id: apputils_branch
+        continue-on-error: true
+        run: |
+          git ls-remote --exit-code --heads https://github.com/infrawatch/apputils.git "$(echo ${GITHUB_REF#refs/heads/})"
+      - name: Run sg-agent tests
+        run: |
+          docker run --name=sgagent -uroot --network host \
+            -e GITHUB_REF -e FOUND_CORE_BRANCH=${{ steps.core_branch.outcome }} \
+            -e FOUND_APPUTILS_BRANCH=${{ steps.apputils_branch.outcome }} \
+            --volume ${{ github.workspace }}:$PROJECT_ROOT:z --workdir $PROJECT_ROOT \
+            $TEST_IMAGE bash $PROJECT_ROOT/ci/integration/run_scheduler.sh

@@ -1,0 +1,23 @@
+---
+
+pluginDir: /usr/lib64/sg-core
+logLevel: debug
+handlerErrors: false
+
+transports: []
+applications:
+  - name: scheduler
+    config:
+      schedule:
+        - name: test1
+          command: "echo 'test1'"
+          interval: "1s"
+          type: internal
+        - name: test2
+          command: "echo 'test2'"
+          interval: "2s"
+          type: internal
+  - name: print
+    config:
+      eventsoutput: /tmp/sg-agent.log
+      metricoutput: /dev/null

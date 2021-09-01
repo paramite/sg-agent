@@ -11,14 +11,19 @@ func CreateLogEvent(indexPrefix string, publisherSuffix string, object interface
 	labels := map[string]interface{}{}
 
 	switch obj := object.(type) {
-	//case lib.TaskExecution:
+	case TaskExecution:
 	//	msg = "Reaction task execution request submitted for execution."
-	//  labels["action"] = "reaction"
-	//  laels["task"] = TBD
+	//	labels["action"] = "reaction"
 	case scheduler.Result:
 		msg = "Scheduled task execution request submitted for execution."
-		labels["action"] = "scheduled"
-		labels["task"] = obj.Output
+		if task, ok := obj.Output.(TaskRequest); ok {
+			labels["action"] = "scheduled"
+			labels["name"] = task.Name
+			labels["command"] = task.Command
+			labels["type"] = task.Type
+		} else {
+			return nil
+		}
 	}
 
 	return &data.Event{
