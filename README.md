@@ -11,10 +11,11 @@ well with other availability monitoring solutions such as sensu-core, sensu-go,
 Nagios, Icinga, Zabbix or even Datadog.
 
 TO-DO:
-  [ ] basic functionality
-  [ ] sensu-core mediator (via RabbitMQ)
-  [ ] sensu-go mediator (via websockets)
-  [ ] DataDog mediator (via DogStatsD)
-  [ ] Nagios mediator (via special Nagios plugin)
-  [ ] Icinga mediator (via Icinga API)
-  [ ] Zabbix mediator (via Zabbix API)
+
+  - [ ] basic functionality
+  - [ ] sensu-core mediator (via RabbitMQ)
+  - [ ] sensu-go mediator (via websockets)
+  - [ ] DataDog mediator (via DogStatsD)
+  - [ ] Nagios mediator (via special Nagios plugin)
+  - [ ] Icinga mediator (via Icinga API)
+  - [ ] Zabbix mediator (via Zabbix API)
