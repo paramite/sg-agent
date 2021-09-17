@@ -1,7 +1,8 @@
 package lib
 
 import (
-	"github.com/infrawatch/apputils/scheduler"
+	"fmt"
+
 	"github.com/infrawatch/sg-core/pkg/data"
 )
 
@@ -11,19 +12,18 @@ func CreateLogEvent(indexPrefix string, publisherSuffix string, object interface
 	labels := map[string]interface{}{}
 
 	switch obj := object.(type) {
-	case TaskExecution:
-	//	msg = "Reaction task execution request submitted for execution."
-	//	labels["action"] = "reaction"
-	case scheduler.Result:
-		msg = "Scheduled task execution request submitted for execution."
-		if task, ok := obj.Output.(TaskRequest); ok {
-			labels["action"] = "scheduled"
-			labels["name"] = task.Name
-			labels["command"] = task.Command
-			labels["type"] = task.Type
-		} else {
-			return nil
+	case *Job:
+		msg = "Task execution request fulfilled."
+		if len(obj.Execution.Attempts) > 0 {
+			result := obj.Execution.Attempts[len(obj.Execution.Attempts)-1]
+			msg = fmt.Sprintf("%s %d. attempt -> RC: %d (in %.3fs)", msg, len(obj.Execution.Attempts), result.ReturnCode, result.Duration)
 		}
+		labels["name"] = obj.Execution.Task.Name
+		labels["command"] = obj.Execution.Task.Command
+	case Task:
+		msg = "Scheduled task execution request submitted for execution."
+		labels["name"] = obj.Name
+		labels["command"] = obj.Command
 	}
 
 	return &data.Event{
