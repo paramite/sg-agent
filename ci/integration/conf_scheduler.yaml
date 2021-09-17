@@ -17,6 +17,9 @@ applications:
           command: "echo 'test2'"
           interval: "2s"
           type: internal
+  - name: executor
+    config:
+      workDirectory: /var/tmp
   - name: print
     config:
       eventsoutput: /tmp/sg-agent.log

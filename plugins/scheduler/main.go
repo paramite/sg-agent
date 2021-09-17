@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	appname = "agent-scheduler"
+	appname = "scheduler"
 )
 
 // SchedulerConfig holds configuration for the plugin
@@ -27,6 +27,9 @@ type SchedulerConfig struct {
 }
 
 func requestExec(ts *TaskScheduler, task *lib.TaskRequest) {
+	if task.Retries < 1 {
+		task.Retries = 1
+	}
 	event := data.Event{
 		Time:      lib.GetTimestamp(),
 		Type:      data.TASK,
