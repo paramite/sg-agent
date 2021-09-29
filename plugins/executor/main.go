@@ -96,8 +96,8 @@ func (te *Executor) ReceiveEvent(event data.Event) {
 	case data.LOG:
 		// NOTE: Do not react on own emits
 	case data.TASK:
-		if req, ok := event.Labels["task"]; ok {
-			if task, ok := req.(lib.Task); ok {
+		if tsk, ok := event.Labels["task"]; ok {
+			if task, ok := tsk.(lib.Task); ok {
 				// prepare job
 				var instructions lib.ExecutionInstruction
 				if instr, ok := event.Labels["instructions"]; !ok {
@@ -127,7 +127,7 @@ func (te *Executor) ReceiveEvent(event data.Event) {
 					te.logger.Warn("did not manage to execute scheduled task")
 				}
 			} else {
-				te.logger.Metadata(logging.Metadata{"plugin": appname, "type": fmt.Sprintf("%T", req)})
+				te.logger.Metadata(logging.Metadata{"plugin": appname, "type": fmt.Sprintf("%T", tsk)})
 				te.logger.Debug("unknow type of task data")
 			}
 		} else {

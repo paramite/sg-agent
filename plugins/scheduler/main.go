@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/infrawatch/apputils/config"
 	"github.com/infrawatch/apputils/logging"
 	"github.com/infrawatch/apputils/scheduler"
 	"github.com/infrawatch/sg-agent/lib"
@@ -77,9 +78,13 @@ func New(logger *logging.Logger, sendEvent bus.EventPublishFunc) application.App
 // to configured scenario, eg. reactor part
 func (ts *TaskScheduler) ReceiveEvent(event data.Event) {
 	switch event.Type {
+	case data.LOG:
+		// NOTE: Do not react on own emits
+	case data.TASK:
+		// NOTE: Do not react on own emits
 	case data.RESULT:
 		/*
-			{                                                                                                                                                                                                                              [9/1792]
+			{
 			  "Index": "",
 			  "Type": "result",
 			  "Publisher": "lenovo-p720-rdo-13.tpb.lab.eng.brq.redhat.com-executor",
@@ -87,47 +92,47 @@ func (ts *TaskScheduler) ReceiveEvent(event data.Event) {
 			  "Message": "",
 			  "Labels": {
 			    "result": {
-			      "Request": {
+			      "Task": {
 			        "Name": "test1",
-			        "Command": "echo 'test1'",
-			        "Interval": "1s",
-			        "Timeout": 0,
-			        "MuteOn": null,
-			        "Retries": 1,
-			        "CoolDown": 0,
-			        "Type": "internal"
+			        "Command": "echo 'test1'"
 			      },
+			      "Requested": 1632778970,
 			      "Requestor": "lenovo-p720-rdo-13.tpb.lab.eng.brq.redhat.com-scheduler",
-			      "Requested": 1632345705,
 			      "Executor": "lenovo-p720-rdo-13.tpb.lab.eng.brq.redhat.com-executor",
 			      "Attempts": [
 			        {
-			          "Executed": 1632345705,
-			          "Duration": 0.001396,
+			          "Executed": 1632778971,
+			          "Duration": 0.001132,
 			          "ReturnCode": 0,
 			          "StdOut": "test1\n",
 			          "StdErr": ""
 			        }
 			      ],
-			      "Status": 0
+			      "Status": "success"
 			    }
 			  },
 			  "Annotations": null
 			}
 
 		*/
-	case data.LOG:
-		// NOTE: Do not react on own emits
-	case data.TASK:
-		// NOTE: ditto
+		if res, ok := event.Labels["result"]; ok {
+			if result, ok := res.(lib.Execution); ok {
+				//  TODO
+				fmt.Printf("%v\n", result)<
+			} else {
+				ts.logger.Metadata(logging.Metadata{"plugin": appname, "type": fmt.Sprintf("%T", res)})
+				ts.logger.Debug("unknow type of result data")
+			}
+		} else {
+			ts.logger.Metadata(logging.Metadata{"plugin": appname, "event": event})
+			ts.logger.Debug("missing result in event data")
+		}
 	default:
 		ts.logger.Metadata(logging.Metadata{"plugin": appname, "event": event})
 		ts.logger.Debug("received unknown event")
 		return
 	}
 
-	// TODO: 1. browse reactions for specific task
-	//       2. if reactions for the task are configured, search for specific scenario (success/failure/warning)
 }
 
 // Run creates task requests according to schedule, eg. scheduler part
@@ -166,6 +171,8 @@ done:
 
 // Config implements application.Application
 func (ts *TaskScheduler) Config(c []byte) error {
+	config.Validate.RegisterValidation("condition", conditionValidator)
+
 	ts.conf = &SchedulerConfig{
 		LogActions:     true,
 		LogIndexPrefix: "agentlogs",
@@ -180,7 +187,7 @@ func (ts *TaskScheduler) Config(c []byte) error {
 		ts.tasks[task.Name] = task
 	}
 
-	// register each task to a schedule
+	// register schedule items
 	for _, item := range ts.conf.Schedule {
 		data := item
 		if _, ok := ts.tasks[data.Task]; !ok {
@@ -198,6 +205,17 @@ func (ts *TaskScheduler) Config(c []byte) error {
 			ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": data.Task})
 			ts.logger.Debug("failed to register task execution")
 		}
+	}
+
+	// register reaction items
+	for _, item := range ts.conf.Reactions {
+		data := item
+		for _, tsk := range []string{data.OfTask, data.Reaction} {
+			if _, ok := ts.tasks[tsk]; !ok {
+				return fmt.Errorf("task %s was not found in task list", tsk)
+			}
+		}
+		ts.reactions[data.OfTask] = data
 	}
 
 	return nil
