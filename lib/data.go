@@ -1,7 +1,10 @@
 package lib
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -165,9 +168,18 @@ type Execution struct {
 	Status    string
 }
 
+// Run holds data of single execution attempt run
+type Run struct {
+	Context context.Context
+	Cancel  context.CancelFunc
+	Stdout  bytes.Buffer
+	Stderr  bytes.Buffer
+	Command *exec.Cmd
+}
+
 // Job is used for following actual command run
 type Job struct {
 	Execution    Execution
 	Instructions ExecutionInstruction
-	Cancel       func()
+	CurrentRun   Run
 }

@@ -27,6 +27,7 @@ const (
 func safeSend(jobs chan *lib.Job, job *lib.Job) (success bool) {
 	defer func() {
 		if recover() != nil {
+			job.CurrentRun.Cancel()
 			success = false
 		}
 	}()
@@ -87,6 +88,33 @@ func (te *Executor) getScript(task *lib.Task) (string, error) {
 	return script, nil
 }
 
+func executeJob(te *Executor, job *lib.Job) {
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if job.Instructions.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(job.Instructions.Timeout)*time.Second)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+	script, err := te.getScript(&job.Execution.Task)
+	if err != nil {
+		te.logger.Metadata(logging.Metadata{"plugin": appname, "task": job.Execution.Task})
+		te.logger.Warn("failed to get script file")
+	} else {
+		job.CurrentRun = lib.Run{
+			Stdout:  bytes.Buffer{},
+			Stderr:  bytes.Buffer{},
+			Command: exec.CommandContext(ctx, te.conf.ShellPath, script),
+			Context: ctx,
+			Cancel:  cancel,
+		}
+		job.Execution.Attempts = append(job.Execution.Attempts, lib.ExecutionAttempt{Executed: lib.GetTimestamp()})
+		job.CurrentRun.Command.Stdout = &job.CurrentRun.Stdout
+		job.CurrentRun.Command.Stderr = &job.CurrentRun.Stderr
+		job.CurrentRun.Command.Start()
+	}
+}
+
 // ReceiveEvent listens for task results and reacts on them if necessary according
 // to configured scenario, eg. reactor part
 func (te *Executor) ReceiveEvent(event data.Event) {
@@ -121,6 +149,7 @@ func (te *Executor) ReceiveEvent(event data.Event) {
 					},
 					Instructions: instructions,
 				}
+				executeJob(te, &job)
 
 				if !safeSend(te.jobs, &job) {
 					te.logger.Metadata(logging.Metadata{"plugin": appname, "task": job.Execution.Task})
@@ -157,82 +186,72 @@ func (te *Executor) Run(ctx context.Context, done chan bool) {
 			defer wg.Done()
 			for job := range te.jobs {
 				status := lib.SUCCESS
-			attempts:
-				for i := 0; i < job.Instructions.Retries; i++ {
-					var ctx context.Context
-					var cancel context.CancelFunc
-					if job.Instructions.Timeout > 0 {
-						ctx, cancel = context.WithTimeout(context.Background(), time.Duration(job.Instructions.Timeout)*time.Second)
+				job.CurrentRun.Command.Wait()
+				// record the attempt
+				idx := len(job.Execution.Attempts) - 1
+				cmd := job.CurrentRun.Command
+				(job.Execution.Attempts[idx]).Duration = (cmd.ProcessState.SystemTime() + cmd.ProcessState.UserTime()).Seconds()
+				(job.Execution.Attempts[idx]).ReturnCode = cmd.ProcessState.ExitCode()
+				(job.Execution.Attempts[idx]).StdOut = job.CurrentRun.Stdout.String()
+				(job.Execution.Attempts[idx]).StdErr = job.CurrentRun.Stderr.String()
+
+				if te.conf.LogActions {
+					record := lib.CreateLogEvent(te.conf.LogIndexPrefix, appname, job)
+					if record != nil {
+						te.emit(*record)
 					} else {
-						ctx, cancel = context.WithCancel(context.Background())
-					}
-					defer cancel()
-					script, err := te.getScript(&job.Execution.Task)
-					if err != nil {
-						te.logger.Metadata(logging.Metadata{"plugin": appname, "task": job.Execution.Task})
-						te.logger.Warn("failed to get script file")
-						break
-					}
-					command := exec.CommandContext(ctx, te.conf.ShellPath, script)
-					stdout := bytes.Buffer{}
-					stderr := bytes.Buffer{}
-					command.Stdout = &stdout
-					command.Stderr = &stderr
-					command.Run()
-
-					// record the attempt
-					rc := command.ProcessState.ExitCode()
-					job.Execution.Attempts = append(job.Execution.Attempts, lib.ExecutionAttempt{
-						Executed:   lib.GetTimestamp(),
-						Duration:   (command.ProcessState.SystemTime() + command.ProcessState.UserTime()).Seconds(),
-						ReturnCode: rc,
-						StdOut:     stdout.String(),
-						StdErr:     stderr.String(),
-					})
-
-					if te.conf.LogActions {
-						record := lib.CreateLogEvent(te.conf.LogIndexPrefix, appname, job)
-						if record != nil {
-							te.emit(*record)
-						} else {
-							te.logger.Metadata(logging.Metadata{"plugin": appname, "job": job})
-							te.logger.Warn("failed format log record from job")
-						}
-					}
-
-					// evaluate overall task status
-					if rc == 0 {
-						if status == lib.SUCCESS {
-							status = lib.SUCCESS
-						} else {
-							// previous attempt failed
-							status = lib.WARNING
-						}
-						// no need to continue with attempts
-						break attempts
-					} else {
-						for _, mute := range job.Instructions.MuteOn {
-							if rc == mute {
-								status = lib.WARNING
-								break attempts
-							}
-						}
-					}
-
-					status = lib.ERROR
-					if job.Instructions.CoolDown > 0 {
-						time.Sleep(time.Duration(job.Instructions.CoolDown) * time.Second)
+						te.logger.Metadata(logging.Metadata{"plugin": appname, "job": job})
+						te.logger.Warn("failed format log record from job")
 					}
 				}
 
-				job.Execution.Status = status.String()
-				te.emit(data.Event{
-					Time:      lib.GetTimestamp(),
-					Type:      data.RESULT,
-					Publisher: lib.FormatPublisher(appname),
-					Severity:  status.ToSeverity(),
-					Labels:    map[string]interface{}{"result": job.Execution},
-				})
+				// evaluate overall task status; following cases are possible
+				// RC = 0 && it is first execution attempt -> SUCCESS + do not retry
+				// RC = 0 && it is second+ execution attempt (previous failed) -> WARNING + do not retry
+				// RC != 0 && RC value is in muteOn list -> WARNING + do not retry
+				// RC != 0 -> ERROR + retry if can
+				retry := true
+				if (job.Execution.Attempts[idx]).ReturnCode == 0 {
+					if job.Execution.Status == lib.SUCCESS.String() {
+						job.Execution.Status = lib.SUCCESS.String()
+					} else {
+						// previous attempt failed
+						job.Execution.Status = lib.WARNING.String()
+					}
+					retry = false
+				} else {
+					for _, mute := range job.Instructions.MuteOn {
+						if (job.Execution.Attempts[idx]).ReturnCode == mute {
+							job.Execution.Status = lib.WARNING.String()
+							retry = false
+							break
+						}
+					}
+				}
+				job.Execution.Status = lib.ERROR.String()
+
+				if !retry || len(job.Execution.Attempts) == job.Instructions.Retries {
+					// report result
+					te.emit(data.Event{
+						Time:      lib.GetTimestamp(),
+						Type:      data.RESULT,
+						Publisher: lib.FormatPublisher(appname),
+						Severity:  status.ToSeverity(),
+						Labels:    map[string]interface{}{"result": job.Execution},
+					})
+				} else {
+					// execute another attempt and put the job back to queue
+					if job.Instructions.CoolDown > 0 {
+						time.Sleep(time.Duration(job.Instructions.CoolDown) * time.Second)
+					}
+					executeJob(te, job)
+					go func(te *Executor, job *lib.Job) {
+						if !safeSend(te.jobs, job) {
+							te.logger.Metadata(logging.Metadata{"plugin": appname, "task": job.Execution.Task})
+							te.logger.Warn("did not manage to execute scheduled task")
+						}
+					}(te, job)
+				}
 			}
 		}(te, &wg, i)
 	}
