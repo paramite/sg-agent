@@ -63,7 +63,7 @@ func requestExec(ts *TaskScheduler, item interface{}) {
 	ts.logger.Debug("task execution request emitted")
 }
 
-// TaskScheduler plugin saves events to Elasticsearch database
+// TaskScheduler plugin creates task execution requests according to configured schedule
 type TaskScheduler struct {
 	conf      *SchedulerConfig
 	logger    *logging.Logger
