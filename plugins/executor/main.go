@@ -45,14 +45,16 @@ type ExecutorConfig struct {
 	Workers        int
 }
 
-// Executor plugin saves events to Elasticsearch database
+// Executor plugin executes requested tasks
 type Executor struct {
-	conf       *ExecutorConfig
-	logger     *logging.Logger
-	scriptLock sync.Mutex
-	scripts    map[string]string
-	emit       bus.EventPublishFunc
-	jobs       chan *lib.Job
+	conf        *ExecutorConfig
+	logger      *logging.Logger
+	scriptLock  sync.Mutex
+	scripts     map[string]string
+	emit        bus.EventPublishFunc
+	jobs        chan *lib.Job
+	runListLock sync.Mutex
+	runList     map[string]struct{}
 }
 
 // New constructor
@@ -126,6 +128,15 @@ func (te *Executor) ReceiveEvent(event data.Event) {
 	case data.TASK:
 		if tsk, ok := event.Labels["task"]; ok {
 			if task, ok := tsk.(lib.Task); ok {
+				// check if job with this task is not already running
+				te.runListLock.Lock()
+				if _, ok := te.runList[task.Name]; ok {
+					te.logger.Metadata(logging.Metadata{"plugin": appname, "task": task.Name})
+					te.logger.Warn("task already running, skipping execution")
+				} else {
+					te.runList[task.Name] = struct{}{}
+				}
+				te.runListLock.Unlock()
 				// prepare job
 				var instructions lib.ExecutionInstruction
 				if instr, ok := event.Labels["instructions"]; !ok {
@@ -228,7 +239,9 @@ func (te *Executor) Run(ctx context.Context, done chan bool) {
 						}
 					}
 				}
-				job.Execution.Status = lib.ERROR.String()
+				if retry {
+					job.Execution.Status = lib.ERROR.String()
+				}
 
 				if !retry || len(job.Execution.Attempts) == job.Instructions.Retries {
 					// report result
@@ -239,6 +252,9 @@ func (te *Executor) Run(ctx context.Context, done chan bool) {
 						Severity:  status.ToSeverity(),
 						Labels:    map[string]interface{}{"result": job.Execution},
 					})
+					te.runListLock.Lock()
+					delete(te.runList, job.Execution.Task.Name)
+					te.runListLock.Unlock()
 				} else {
 					// execute another attempt and put the job back to queue
 					if job.Instructions.CoolDown > 0 {
