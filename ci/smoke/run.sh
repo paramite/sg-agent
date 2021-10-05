@@ -55,7 +55,7 @@ PLUGIN_DIR=/usr/lib64/sg-core/ ./build.sh
 # produce some events
 /tmp/sg-core -config ./ci/smoke/config.yaml &>/tmp/sg-core.log &
 CORE_PID=$!
-sleep 5 # should produce 5 times task1 and 2 times task2
+sleep 12
 kill -9 $CORE_PID
 
 # debug output
