@@ -9,7 +9,6 @@ import (
 
 	"gopkg.in/go-playground/validator.v9"
 
-	"github.com/infrawatch/apputils/config"
 	"github.com/infrawatch/apputils/logging"
 	"github.com/infrawatch/apputils/scheduler"
 	"github.com/infrawatch/sg-agent/lib"
