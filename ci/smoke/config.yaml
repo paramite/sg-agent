@@ -1,0 +1,45 @@
+---
+
+pluginDir: /usr/lib64/sg-core
+logLevel: debug
+handlerErrors: false
+
+transports: []
+applications:
+  - name: scheduler
+    config:
+      logActions: true
+      tasks:
+        - name: test1
+          command: "echo 'test1'"
+        - name: test2
+          command: "echo 'test2' && exit 1"
+        - name: test3
+          command: "echo 'test3' && exit 3"
+        - name: test4
+          command: "echo 'test4'"
+      schedule:
+        - task: test1
+          interval: "1s"
+        - task: test2
+          interval: "1s"
+          instructions:
+            retries: 4
+            coolDown: 1
+        - task: test3
+          interval: "3s"
+          instructions:
+            muteOn:
+              - 3
+      reactions:
+        - ofTask: test3
+          condition: status=warning
+          reaction: test4
+  - name: executor
+    config:
+      logActions: true
+      workDirectory: /var/tmp
+  - name: print
+    config:
+      eventsoutput: /tmp/sg-agent.log
+      metricoutput: /dev/null

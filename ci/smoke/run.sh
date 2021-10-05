@@ -53,7 +53,7 @@ fi
 PLUGIN_DIR=/usr/lib64/sg-core/ ./build.sh
 
 # produce some events
-/tmp/sg-core -config ./ci/integration/conf_scheduler.yaml &>/tmp/sg-core.log &
+/tmp/sg-core -config ./ci/smoke/config.yaml &>/tmp/sg-core.log &
 CORE_PID=$!
 sleep 5 # should produce 5 times task1 and 2 times task2
 kill -9 $CORE_PID
@@ -63,4 +63,4 @@ cat /tmp/sg-core.log
 cat /tmp/sg-agent.log
 
 # validate produced events
-./ci/integration/validate_scheduler.py /tmp/sg-agent.log
+./ci/smoke/validate.py /tmp/sg-agent.log

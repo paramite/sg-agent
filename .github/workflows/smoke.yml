@@ -1,4 +1,4 @@
-name: Integration testing
+name: Smoke testing
 env:
   PROJECT_ROOT: /root/go/src/github.com/infrawatch/sg-agent
 
@@ -7,8 +7,8 @@ env:
 on: push
 
 jobs:
-  scheduler:
-    name: "test scheduler"
+  smoketest:
+    name: "basic functionality test"
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout code
@@ -29,4 +29,4 @@ jobs:
             -e GITHUB_REF -e FOUND_CORE_BRANCH=${{ steps.core_branch.outcome }} \
             -e FOUND_APPUTILS_BRANCH=${{ steps.apputils_branch.outcome }} \
             --volume ${{ github.workspace }}:$PROJECT_ROOT:z --workdir $PROJECT_ROOT \
-            $TEST_IMAGE bash $PROJECT_ROOT/ci/integration/run_scheduler.sh
+            $TEST_IMAGE bash $PROJECT_ROOT/ci/smoke/run.sh
