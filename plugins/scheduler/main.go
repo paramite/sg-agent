@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
+
+	"gopkg.in/go-playground/validator.v9"
 
 	"github.com/infrawatch/apputils/config"
 	"github.com/infrawatch/apputils/logging"
@@ -29,9 +33,20 @@ type SchedulerConfig struct {
 	Reactions      []lib.Reaction     `validate:"dive"`
 }
 
-func requestExec(ts *TaskScheduler, item *lib.ScheduleItem) {
-	if item.Instructions.Retries < 1 {
-		item.Instructions.Retries = 1
+func requestExec(ts *TaskScheduler, item interface{}) {
+	taskName := ""
+	instr := lib.ExecutionInstruction{}
+	switch request := item.(type) {
+	case lib.ScheduleItem:
+		taskName = request.Task
+		instr = request.Instructions
+	case lib.Reaction:
+		taskName = request.Reaction
+		instr = request.Instructions
+	}
+
+	if instr.Retries < 1 {
+		instr.Retries = 1
 	}
 	event := data.Event{
 		Time:      lib.GetTimestamp(),
@@ -39,23 +54,23 @@ func requestExec(ts *TaskScheduler, item *lib.ScheduleItem) {
 		Publisher: lib.FormatPublisher(appname),
 		Severity:  data.INFO,
 		Labels: map[string]interface{}{
-			"task":         ts.tasks[item.Task],
-			"instructions": item.Instructions,
+			"task":         ts.tasks[taskName],
+			"instructions": instr,
 		},
 	}
 	ts.emit(event)
 
-	ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": item.Task})
+	ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": taskName})
 	ts.logger.Debug("task execution request emitted")
 }
 
-// TaskScheduler plugin saves events to Elasticsearch database
+// TaskScheduler plugin creates task execution requests according to configured schedule
 type TaskScheduler struct {
 	conf      *SchedulerConfig
 	logger    *logging.Logger
 	tasks     map[string]lib.Task
 	schedule  *scheduler.Scheduler
-	reactions map[string]lib.Reaction
+	reactions map[string][]lib.Reaction
 	emit      bus.EventPublishFunc
 }
 
@@ -67,10 +82,11 @@ func New(logger *logging.Logger, sendEvent bus.EventPublishFunc) application.App
 		logger.Warn("error during initialization")
 	}
 	return &TaskScheduler{
-		logger:   logger,
-		tasks:    make(map[string]lib.Task),
-		schedule: sched,
-		emit:     sendEvent,
+		logger:    logger,
+		tasks:     make(map[string]lib.Task),
+		schedule:  sched,
+		reactions: make(map[string][]lib.Reaction),
+		emit:      sendEvent,
 	}
 }
 
@@ -83,42 +99,18 @@ func (ts *TaskScheduler) ReceiveEvent(event data.Event) {
 	case data.TASK:
 		// NOTE: Do not react on own emits
 	case data.RESULT:
-		/*
-			{
-			  "Index": "",
-			  "Type": "result",
-			  "Publisher": "lenovo-p720-rdo-13.tpb.lab.eng.brq.redhat.com-executor",
-			  "Severity": 2,
-			  "Message": "",
-			  "Labels": {
-			    "result": {
-			      "Task": {
-			        "Name": "test1",
-			        "Command": "echo 'test1'"
-			      },
-			      "Requested": 1632778970,
-			      "Requestor": "lenovo-p720-rdo-13.tpb.lab.eng.brq.redhat.com-scheduler",
-			      "Executor": "lenovo-p720-rdo-13.tpb.lab.eng.brq.redhat.com-executor",
-			      "Attempts": [
-			        {
-			          "Executed": 1632778971,
-			          "Duration": 0.001132,
-			          "ReturnCode": 0,
-			          "StdOut": "test1\n",
-			          "StdErr": ""
-			        }
-			      ],
-			      "Status": "success"
-			    }
-			  },
-			  "Annotations": null
-			}
-
-		*/
 		if res, ok := event.Labels["result"]; ok {
 			if result, ok := res.(lib.Execution); ok {
-				//  TODO
-				fmt.Printf("%v\n", result)<
+				if rList, ok := ts.reactions[result.Task.Name]; ok {
+					for _, reaction := range rList {
+						if reaction.Required(result) {
+							requestExec(ts, reaction)
+						}
+					}
+				} else {
+					ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": result.Task.Name})
+					ts.logger.Debug("no reaction found for received task result")
+				}
 			} else {
 				ts.logger.Metadata(logging.Metadata{"plugin": appname, "type": fmt.Sprintf("%T", res)})
 				ts.logger.Debug("unknow type of result data")
@@ -169,6 +161,37 @@ done:
 	ts.logger.Info("exited")
 }
 
+func conditionValidator(fl validator.FieldLevel) bool {
+	value := fl.Field().String()
+	parts := strings.Split(value, "=")
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "status" {
+		for _, cond := range (lib.ExecutionStatus(0)).List() {
+			if parts[1] == cond {
+				return true
+			}
+		}
+	}
+	if parts[0] == "rc" {
+		if _, err := strconv.Atoi(parts[1]); err == nil {
+			return true
+		}
+	}
+	if parts[0] == "duration" {
+		if _, err := lib.IntervalToDuration(parts[1]); err == nil {
+			return true
+		}
+	}
+	for _, cond := range []string{"stdout=", "stderr="} {
+		if strings.HasPrefix(value, cond) {
+			return true
+		}
+	}
+	return false
+}
+
 // Config implements application.Application
 func (ts *TaskScheduler) Config(c []byte) error {
 	config.Validate.RegisterValidation("condition", conditionValidator)
@@ -196,7 +219,7 @@ func (ts *TaskScheduler) Config(c []byte) error {
 
 		err := ts.schedule.RegisterTask(data.Task, data.Interval, 0,
 			func(ctx context.Context, log *logging.Logger) (interface{}, error) {
-				requestExec(ts, &data)
+				requestExec(ts, data)
 				ts.logger.Metadata(logging.Metadata{"plugin": appname, "task": data.Task})
 				ts.logger.Debug("task execution requested")
 				return data, nil
@@ -215,7 +238,12 @@ func (ts *TaskScheduler) Config(c []byte) error {
 				return fmt.Errorf("task %s was not found in task list", tsk)
 			}
 		}
-		ts.reactions[data.OfTask] = data
+
+		if taskList, ok := ts.reactions[data.OfTask]; !ok {
+			ts.reactions[data.OfTask] = []lib.Reaction{data}
+		} else {
+			ts.reactions[data.OfTask] = append(taskList, data)
+		}
 	}
 
 	return nil

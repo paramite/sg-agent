@@ -1,13 +1,14 @@
 package lib
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/go-playground/validator.v9"
 
 	"github.com/infrawatch/sg-core/pkg/data"
 )
@@ -69,8 +70,9 @@ type ScheduleItem struct {
 	Instructions ExecutionInstruction `validate:"dive"`
 }
 
+// IntervalToDuration converts interval string to equivalent duration
 // TODO: remove once available in apputils
-func intervalToDuration(interval string) (time.Duration, error) {
+func IntervalToDuration(interval string) (time.Duration, error) {
 	var out time.Duration
 	intervalRegex := regexp.MustCompile(`(\d*)([smhd])`)
 
@@ -100,43 +102,6 @@ func intervalToDuration(interval string) (time.Duration, error) {
 	return out, nil
 }
 
-func conditionValidator(fl validator.FieldLevel) bool {
-	value := fl.Field().String()
-
-	parts := strings.Split(value, "=")
-	if len(parts) != 2 {
-		return false
-	}
-
-	if parts[0] == "status" {
-		for _, cond := range (ExecutionStatus(0)).List() {
-			if parts[1] == cond {
-				return true
-			}
-		}
-	}
-
-	if parts[0] == "rc" {
-		if _, err := strconv.Atoi(parts[1]); err == nil {
-			return true
-		}
-	}
-
-	if parts[0] == "duration" {
-		if _, err := intervalToDuration(parts[1]); err == nil {
-			return true
-		}
-	}
-
-	for _, cond := range []string{"stdout=", "stderr="} {
-		if strings.HasPrefix(value, cond) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // Reaction holds information on which task result sg-agent should react and by which tasks
 // execution should be reacted
 type Reaction struct {
@@ -144,6 +109,44 @@ type Reaction struct {
 	Condition    string `validate:"condition"`
 	Reaction     string
 	Instructions ExecutionInstruction
+}
+
+// Required returns true if there is the reaction required on given task result. Otherwise returns false.
+func (react *Reaction) Required(result Execution) bool {
+	output := false
+
+	lastAttempt := result.Attempts[len(result.Attempts)-1]
+	parts := strings.Split(react.Condition, "=")
+	switch parts[0] {
+	case "status":
+		return result.Status == parts[1]
+	case "rc":
+		condRC, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return false
+		}
+		return lastAttempt.ReturnCode == condRC
+	case "duration":
+		condDur, err := IntervalToDuration(parts[1])
+		if err != nil {
+			return false
+		}
+		return lastAttempt.Duration >= condDur.Seconds()
+	case "stdout":
+		rex, err := regexp.Compile(parts[1])
+		if err != nil {
+			return false
+		}
+		return rex.FindString(lastAttempt.StdOut) != ""
+	case "stderr":
+		rex, err := regexp.Compile(parts[1])
+		if err != nil {
+			return false
+		}
+		return rex.FindString(lastAttempt.StdErr) != ""
+	}
+
+	return output
 }
 
 // ExecutionAttempt holds data about command
@@ -165,9 +168,18 @@ type Execution struct {
 	Status    string
 }
 
+// Run holds data of single execution attempt run
+type Run struct {
+	Context context.Context
+	Cancel  context.CancelFunc
+	Stdout  bytes.Buffer
+	Stderr  bytes.Buffer
+	Command *exec.Cmd
+}
+
 // Job is used for following actual command run
 type Job struct {
 	Execution    Execution
 	Instructions ExecutionInstruction
-	Cancel       func()
+	CurrentRun   Run
 }
