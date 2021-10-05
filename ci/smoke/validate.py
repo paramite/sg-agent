@@ -26,9 +26,6 @@ expected = [
             'task': {
                 'Name': 'test1',
                 'Command': "echo 'test1'",
-
-
-                'Type': 'internal'
             }
         },
         'Annotations': None
@@ -129,18 +126,6 @@ expected = [
         },
         'Annotations': None
     },
-    {   'Index': 'agentlogs-%s.%s' % (socket.gethostname().replace("-", "_"),
-                                      datetime.datetime.now().strftime("%Y.%m.%d")),
-        'Type': 'log',
-        'Publisher': '%s-scheduler' % socket.gethostname(),
-        'Severity': 2,
-        'Message': 'Scheduled task execution request submitted for execution.',
-        'Labels': {
-            'name': 'test4',
-            'command': "echo 'test4'",
-        },
-        "Annotations": None
-    },
     # executor events
     {
         'Index': '',
@@ -175,7 +160,7 @@ expected = [
         'Index': 'agentlogs-%s.%s' % (socket.gethostname().replace("-", "_"),
                                       datetime.datetime.now().strftime("%Y.%m.%d")),
         'Type': 'log',
-        'Publisher': '%s-scheduler' % socket.gethostname(),
+        'Publisher': '%s-executor' % socket.gethostname(),
         'Severity': 2,
         'Message': 'Task execution request fulfilled. 1. attempt -> RC: 0',
         'Labels': {
@@ -419,9 +404,12 @@ def clean_values(input_dict, keys, value):
         if isinstance(val, dict):
             clean_values(val, keys, value)
         if isinstance(val, list):
+            new = []
             for i in val:
-                if isinstance(val, dict):
-                    clean_values(val, keys, value)
+                if isinstance(i, dict):
+                    clean_values(i, keys, value)
+                new.append(i)
+            input_dict[key] = val
         if key in keys:
             input_dict[key] = value
 
