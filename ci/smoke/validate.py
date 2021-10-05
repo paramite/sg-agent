@@ -427,8 +427,8 @@ def clean_values(input_dict, keys, value):
 
 def validate_event(evt_str):
     evt = json.loads(evt_str)
+    print(">>>>>", evt_str, "<<<<<")
     # clean values which are impossible to mock before runtime
-    clean_values(evt, ['Executed', 'Duration', 'Requested'], -666)
     clean_values(evt, ['Executed', 'Duration', 'Requested'], -666)
     if evt in expected:
         expected.remove(evt)
