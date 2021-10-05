@@ -415,7 +415,7 @@ expected = [
 ]
 
 def clean_values(input_dict, keys, value):
-    for key, val in input_dict.iteritems():
+    for key, val in input_dict.items():
         if isinstance(val, dict):
             clean_values(val, keys, value)
         if isinstance(val, list):
