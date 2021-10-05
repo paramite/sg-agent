@@ -427,7 +427,6 @@ def clean_values(input_dict, keys, value):
 
 def validate_event(evt_str):
     evt = json.loads(evt_str)
-    print(">>>>>", evt_str, "<<<<<")
     # clean values which are impossible to mock before runtime
     clean_values(evt, ['Executed', 'Duration', 'Requested'], -666)
     if evt in expected:
@@ -440,7 +439,7 @@ def main(log_path):
         buffer = ""
         for line in log:
             sline = line.strip()
-            if sline == "{":
+            if not (line.startswith(" ") or line.startswith("\t")) and sline == "{":
                 buffer = sline
             else:
                 buffer += sline
