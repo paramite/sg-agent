@@ -445,7 +445,7 @@ def main(log_path):
             else:
                 buffer += sline
             if not (line.startswith(" ") or line.startswith("\t")) and sline == "}":
-                validate_event(buffer):
+                validate_event(buffer)
 
 
     if expected:
