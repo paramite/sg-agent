@@ -120,7 +120,7 @@ expected = [
                 'Timeout': 0,
                 'Retries': 1,
                 'CoolDown': 0,
-                'MuteOn': null
+                'MuteOn': None
             },
             'task': {
                 'Name': 'test4',
