@@ -178,7 +178,7 @@ expected = [
         'Labels': {
             'result': {
                 'Task': {
-                    'Name': 'test2',
+                    'Name': 'test1',
                     'Command': "echo 'test1'"
                 },
                 'Requested': -666,
@@ -365,7 +365,7 @@ expected = [
             'result': {
                 'Task': {
                     'Name': 'test4',
-                    'Command': "echo 'test3'"
+                    'Command': "echo 'test4'"
                 },
                 'Requested': -666,
                 'Requestor': '%s-scheduler' % socket.gethostname(),
