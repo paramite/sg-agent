@@ -41,7 +41,7 @@ jobs:
       - name: Run sg-agent unit test suite
         run: |
           docker run --name=testsuite -uroot --network host -e COVERALLS_REPO_TOKEN \
-            --volume ${{ github.workspace }}:$PROJECT_ROOT:z --workdir $PROJECT_ROOT
+            --volume ${{ github.workspace }}:$PROJECT_ROOT:z --workdir $PROJECT_ROOT \
             -e GITHUB_REF -e FOUND_APPUTILS_BRANCH=${{ steps.apputils_branch.outcome }} \
             $TEST_IMAGE bash $PROJECT_ROOT/ci/unit/run_tests.sh
       - name: Send coverage
