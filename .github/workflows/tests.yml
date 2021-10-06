@@ -38,11 +38,17 @@ jobs:
         continue-on-error: true
         run: |
           git ls-remote --exit-code --heads https://github.com/infrawatch/apputils.git "$(echo ${GITHUB_REF#refs/heads/})"
+      - name: Check if sg-core repository has same topic branch
+        id: core_branch
+        continue-on-error: true
+        run: |
+          git ls-remote --exit-code --heads https://github.com/infrawatch/sg-core.git "$(echo ${GITHUB_REF#refs/heads/})"
       - name: Run sg-agent unit test suite
         run: |
           docker run --name=testsuite -uroot --network host -e COVERALLS_REPO_TOKEN \
             --volume ${{ github.workspace }}:$PROJECT_ROOT:z --workdir $PROJECT_ROOT \
-            -e GITHUB_REF -e FOUND_APPUTILS_BRANCH=${{ steps.apputils_branch.outcome }} \
+            -e GITHUB_REF -e FOUND_CORE_BRANCH=${{ steps.core_branch.outcome }} \
+            -e FOUND_APPUTILS_BRANCH=${{ steps.apputils_branch.outcome }} \
             $TEST_IMAGE bash $PROJECT_ROOT/ci/unit/run_tests.sh
       - name: Send coverage
         uses: shogo82148/actions-goveralls@v1

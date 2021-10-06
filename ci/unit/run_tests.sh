@@ -18,6 +18,7 @@ EOF
 yum install -y git golang gcc make glibc-langpack-en qpid-proton-c-devel
 
 export APPUTILSPATH=$PWD/apputils
+export COREPATH=$PWD/sg-core
 export GOBIN=$GOPATH/bin
 export PATH=$PATH:$GOBIN
 
@@ -29,6 +30,17 @@ if [[ $FOUND_APPUTILS_BRANCH == 'success' ]]; then
   git checkout "${GITHUB_REF#refs/heads/}"
   popd
   echo "replace $(grep apputils go.mod | tr '\n' ' ' | tr '\t' ' ')=> $APPUTILSPATH" >> go.mod
+fi
+
+if [[ $FOUND_CORE_BRANCH == 'success' ]]; then
+  git clone https://github.com/infrawatch/sg-core $COREPATH
+  pushd $COREPATH
+  git checkout "${GITHUB_REF#refs/heads/}"
+  if [[ $FOUND_APPUTILS_BRANCH == 'success' ]]; then
+    echo "replace $(grep apputils go.mod | tr '\n' ' ' | tr '\t' ' ')=> $APPUTILSPATH" >> go.mod
+  fi
+  popd
+  echo "replace $(grep sg-core go.mod | tr '\n' ' ' | tr '\t' ' ')=> $COREPATH" >> go.mod
 fi
 
 go test -v -coverprofile=profile.cov ./...
