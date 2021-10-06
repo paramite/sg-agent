@@ -17,8 +17,18 @@ EOF
 # without glibc-langpack-en locale setting in CentOS8 is broken without this package
 yum install -y git golang gcc make glibc-langpack-en qpid-proton-c-devel
 
+export APPUTILSPATH=$PWD/apputils
 export GOBIN=$GOPATH/bin
 export PATH=$PATH:$GOBIN
 
 go mod tidy
+
+if [[ $FOUND_APPUTILS_BRANCH == 'success' ]]; then
+  git clone https://github.com/infrawatch/apputils $APPUTILSPATH
+  pushd $APPUTILSPATH
+  git checkout "${GITHUB_REF#refs/heads/}"
+  popd
+  echo "replace $(grep apputils go.mod | tr '\n' ' ' | tr '\t' ' ')=> $APPUTILSPATH" >> go.mod
+fi
+
 go test -v -coverprofile=profile.cov ./...
