@@ -108,7 +108,7 @@ type Reaction struct {
 	OfTask       string `yaml:"ofTask" validate:"required"`
 	Condition    string `validate:"condition"`
 	Reaction     string
-	Instructions ExecutionInstruction
+	Instructions ExecutionInstruction `validate:"dive"`
 }
 
 // Required returns true if there is the reaction required on given task result. Otherwise returns false.

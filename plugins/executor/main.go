@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/infrawatch/apputils/logging"
@@ -91,7 +92,7 @@ func (te *Executor) getScript(task *lib.Task) (string, error) {
 	return script, nil
 }
 
-func executeJob(te *Executor, job *lib.Job) {
+func (te *Executor) executeJob(job *lib.Job) {
 	var ctx context.Context
 	var cancel context.CancelFunc
 	if job.Instructions.Timeout > 0 {
@@ -111,6 +112,19 @@ func executeJob(te *Executor, job *lib.Job) {
 			Context: ctx,
 			Cancel:  cancel,
 		}
+
+		// context timeout kills only shell process but does not kill script execution process (child),
+		// so we need to start everything in process group and kill the group when context is done
+		if job.Instructions.Timeout > 0 {
+			job.CurrentRun.Command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			go func() {
+				<-ctx.Done()
+				if ctx.Err() == context.DeadlineExceeded {
+					syscall.Kill(-job.CurrentRun.Command.Process.Pid, syscall.SIGKILL)
+				}
+			}()
+		}
+
 		job.Execution.Attempts = append(job.Execution.Attempts, lib.ExecutionAttempt{Executed: lib.GetTimestamp()})
 		job.CurrentRun.Command.Stdout = &job.CurrentRun.Stdout
 		job.CurrentRun.Command.Stderr = &job.CurrentRun.Stderr
@@ -161,8 +175,7 @@ func (te *Executor) ReceiveEvent(event data.Event) {
 					},
 					Instructions: instructions,
 				}
-				executeJob(te, &job)
-
+				te.executeJob(&job)
 				if !safeSend(te.jobs, &job) {
 					te.logger.Metadata(logging.Metadata{"plugin": appname, "task": job.Execution.Task})
 					te.logger.Warn("did not manage to execute scheduled task")
@@ -180,6 +193,38 @@ func (te *Executor) ReceiveEvent(event data.Event) {
 		te.logger.Debug("received unknown event")
 		return
 	}
+}
+
+func (te *Executor) retry(job *lib.Job) bool {
+	// evaluate overall task status; following cases are possible
+	// RC = 0 && it is first execution attempt -> SUCCESS + do not retry
+	// RC = 0 && it is second+ execution attempt (previous failed) -> WARNING + do not retry
+	// RC != 0 && RC value is in muteOn list -> WARNING + do not retry
+	// RC != 0 -> ERROR + retry if can
+	retry := true
+	idx := len(job.Execution.Attempts) - 1
+	if (job.Execution.Attempts[idx]).ReturnCode == 0 {
+		if job.Execution.Status == lib.SUCCESS.String() {
+			job.Execution.Status = lib.SUCCESS.String()
+		} else {
+			// previous attempt failed
+			job.Execution.Status = lib.WARNING.String()
+		}
+		retry = false
+	} else {
+		for _, mute := range job.Instructions.MuteOn {
+			if (job.Execution.Attempts[idx]).ReturnCode == mute {
+				job.Execution.Status = lib.WARNING.String()
+				retry = false
+				break
+			}
+		}
+	}
+	if retry {
+		job.Execution.Status = lib.ERROR.String()
+	}
+
+	return retry && len(job.Execution.Attempts) < job.Instructions.Retries
 }
 
 // Run creates task requests according to schedule, eg. scheduler part
@@ -217,34 +262,7 @@ func (te *Executor) Run(ctx context.Context, done chan bool) {
 					}
 				}
 
-				// evaluate overall task status; following cases are possible
-				// RC = 0 && it is first execution attempt -> SUCCESS + do not retry
-				// RC = 0 && it is second+ execution attempt (previous failed) -> WARNING + do not retry
-				// RC != 0 && RC value is in muteOn list -> WARNING + do not retry
-				// RC != 0 -> ERROR + retry if can
-				retry := true
-				if (job.Execution.Attempts[idx]).ReturnCode == 0 {
-					if job.Execution.Status == lib.SUCCESS.String() {
-						job.Execution.Status = lib.SUCCESS.String()
-					} else {
-						// previous attempt failed
-						job.Execution.Status = lib.WARNING.String()
-					}
-					retry = false
-				} else {
-					for _, mute := range job.Instructions.MuteOn {
-						if (job.Execution.Attempts[idx]).ReturnCode == mute {
-							job.Execution.Status = lib.WARNING.String()
-							retry = false
-							break
-						}
-					}
-				}
-				if retry {
-					job.Execution.Status = lib.ERROR.String()
-				}
-
-				if !retry || len(job.Execution.Attempts) == job.Instructions.Retries {
+				if !te.retry(job) {
 					// report result
 					te.emit(data.Event{
 						Time:      lib.GetTimestamp(),
@@ -261,7 +279,7 @@ func (te *Executor) Run(ctx context.Context, done chan bool) {
 					if job.Instructions.CoolDown > 0 {
 						time.Sleep(time.Duration(job.Instructions.CoolDown) * time.Second)
 					}
-					executeJob(te, job)
+					te.executeJob(job)
 					go func(te *Executor, job *lib.Job) {
 						if !safeSend(te.jobs, job) {
 							te.logger.Metadata(logging.Metadata{"plugin": appname, "task": job.Execution.Task})
