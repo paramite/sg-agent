@@ -3,6 +3,7 @@ package lib
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,6 @@ func TestUtils(t *testing.T) {
 		assert.True(t, start <= tested)
 		assert.True(t, float64(time.Now().Unix()) >= GetTimestamp())
 		assert.Equal(t, fmt.Sprintf("%s-wubba", host), FormatPublisher("wubba"))
-		assert.Equal(t, fmt.Sprintf("lubba-%s.%d.%02d.%02d", host, year, month, day), FormatIndex("lubba"))
+		assert.Equal(t, fmt.Sprintf("lubba-%s.%d.%02d.%02d", strings.ReplaceAll(host, "-", "_"), year, month, day), FormatIndex("lubba"))
 	})
 }
