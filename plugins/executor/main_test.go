@@ -74,7 +74,7 @@ func TestExecutor(t *testing.T) {
 
 		_, err = os.Stat(script)
 		assert.NoError(t, err)
-		data, err := os.ReadFile(script)
+		data, err := ioutil.ReadFile(script)
 		require.NoError(t, err)
 		assert.Equal(t, testScript, string(data))
 	})
