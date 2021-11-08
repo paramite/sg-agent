@@ -23,6 +23,7 @@ const (
 	ERROR
 )
 
+//List returns all possible statuses in human readable form
 func (es ExecutionStatus) List() []string {
 	return []string{"success", "warning", "error"}
 }
@@ -105,14 +106,15 @@ func IntervalToDuration(interval string) (time.Duration, error) {
 // Reaction holds information on which task result sg-agent should react and by which tasks
 // execution should be reacted
 type Reaction struct {
-	OfTask       string `yaml:"ofTask" validate:"required"`
-	Condition    string `validate:"condition"`
-	Reaction     string
+	OfTask       string               `yaml:"ofTask" validate:"required_without=OfMetric"`
+	OfMetric     string               `yaml:"ofMetric" validate:"required_without=OfTask"`
+	Condition    string               `validate:"required,condition"`
+	Reaction     string               `validate:"required"`
 	Instructions ExecutionInstruction `validate:"dive"`
 }
 
-// Required returns true if there is the reaction required on given task result. Otherwise returns false.
-func (react *Reaction) Required(result Execution) bool {
+// RequiredOnResult returns true if there is the reaction required on given task result. Otherwise returns false.
+func (react *Reaction) RequiredOnResult(result Execution) bool {
 	output := false
 
 	lastAttempt := result.Attempts[len(result.Attempts)-1]
@@ -147,6 +149,43 @@ func (react *Reaction) Required(result Execution) bool {
 	}
 
 	return output
+}
+
+// RequiredOnValue returns true if there is the reaction required on given task result. Otherwise returns false.
+func (react *Reaction) RequiredOnMetric(metric *data.Metric) bool {
+	for _, sepa := range []string{">=", "<=", ">", "<", "="} {
+		parts := strings.Split(react.Condition, sepa)
+		if len(parts) != 2 {
+			continue
+		}
+
+		switch parts[0] {
+		case "value": // check metric value
+			condVal, err := strconv.ParseFloat(parts[1], 64)
+			if err != nil {
+				return false
+			}
+			switch sepa {
+			case ">=":
+				return metric.Value >= condVal
+			case "<=":
+				return metric.Value <= condVal
+			case ">":
+				return metric.Value > condVal
+			case "<":
+				return metric.Value < condVal
+			case "=":
+				return metric.Value == condVal
+			}
+		default: // check label value
+			for i, label := range metric.LabelKeys {
+				if label == parts[0] {
+					return metric.LabelVals[i] == parts[1]
+				}
+			}
+		}
+	}
+	return false
 }
 
 // ExecutionAttempt holds data about command

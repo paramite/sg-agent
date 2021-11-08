@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/go-playground/validator.v9"
 
@@ -65,12 +66,13 @@ func requestExec(ts *TaskScheduler, item interface{}) {
 
 // TaskScheduler plugin creates task execution requests according to configured schedule
 type TaskScheduler struct {
-	conf      *SchedulerConfig
-	logger    *logging.Logger
-	tasks     map[string]lib.Task
-	schedule  *scheduler.Scheduler
-	reactions map[string][]lib.Reaction
-	emit      bus.EventPublishFunc
+	conf       *SchedulerConfig
+	logger     *logging.Logger
+	tasks      map[string]lib.Task
+	schedule   *scheduler.Scheduler
+	taskReacts map[string][]lib.Reaction
+	metrReacts map[string][]lib.Reaction
+	emit       bus.EventPublishFunc
 }
 
 // New constructor
@@ -81,13 +83,18 @@ func New(logger *logging.Logger, sendEvent bus.EventPublishFunc) application.App
 		logger.Warn("error during initialization")
 	}
 	return &TaskScheduler{
-		logger:    logger,
-		tasks:     make(map[string]lib.Task),
-		schedule:  sched,
-		reactions: make(map[string][]lib.Reaction),
-		emit:      sendEvent,
+		logger:     logger,
+		tasks:      make(map[string]lib.Task),
+		schedule:   sched,
+		taskReacts: make(map[string][]lib.Reaction),
+		metrReacts: make(map[string][]lib.Reaction),
+		emit:       sendEvent,
 	}
 }
+
+// TODO(mmagr): Once we will have possibility to let plugins communicate in sg-core via external meessage bus
+//              (eg. via transports), we should move ReceiveEvent and ReceiveMetric to separate plugin called reactor,
+//              so that user is able to run scheduling part and reacting part separately
 
 // ReceiveEvent listens for task results and reacts on them if necessary according
 // to configured scenario, eg. reactor part
@@ -100,9 +107,9 @@ func (ts *TaskScheduler) ReceiveEvent(event data.Event) {
 	case data.RESULT:
 		if res, ok := event.Labels["result"]; ok {
 			if result, ok := res.(lib.Execution); ok {
-				if rList, ok := ts.reactions[result.Task.Name]; ok {
+				if rList, ok := ts.taskReacts[result.Task.Name]; ok {
 					for _, reaction := range rList {
-						if reaction.Required(result) {
+						if reaction.RequiredOnResult(result) {
 							requestExec(ts, reaction)
 						}
 					}
@@ -123,7 +130,28 @@ func (ts *TaskScheduler) ReceiveEvent(event data.Event) {
 		ts.logger.Debug("received unknown event")
 		return
 	}
+}
 
+// ReceiveMetric listens on
+func (ts *TaskScheduler) ReceiveMetric(name string, t float64, typ data.MetricType, interval time.Duration, value float64, labelKeys []string, labelVals []string) {
+	if rList, ok := ts.metrReacts[name]; ok {
+		metric := data.Metric{
+			Name:      name,
+			Time:      t,
+			Type:      typ,
+			Interval:  interval,
+			Value:     value,
+			LabelKeys: labelKeys,
+			LabelVals: labelVals,
+		}
+		for _, reaction := range rList {
+			if reaction.RequiredOnMetric(&metric) {
+				ts.logger.Metadata(logging.Metadata{"plugin": appname, "metric": metric, "reaction": reaction})
+				ts.logger.Debug("received metric passed reaction condition")
+				requestExec(ts, reaction)
+			}
+		}
+	}
 }
 
 // Run creates task requests according to schedule, eg. scheduler part
@@ -232,17 +260,30 @@ func (ts *TaskScheduler) Config(c []byte) error {
 	// register reaction items
 	for _, item := range ts.conf.Reactions {
 		data := item
-		for _, tsk := range []string{data.OfTask, data.Reaction} {
-			if _, ok := ts.tasks[tsk]; !ok {
-				return fmt.Errorf("task %s was not found in task list", tsk)
+
+		if _, ok := ts.tasks[data.Reaction]; !ok {
+			return fmt.Errorf("task %s was not found in task list", data.Reaction)
+		}
+
+		if data.OfTask != "" {
+			// register task based reaction
+			if _, ok := ts.tasks[data.OfTask]; !ok {
+				return fmt.Errorf("task %s was not found in task list", data.OfTask)
+			}
+			if taskList, ok := ts.taskReacts[data.OfTask]; !ok {
+				ts.taskReacts[data.OfTask] = []lib.Reaction{data}
+			} else {
+				ts.taskReacts[data.OfTask] = append(taskList, data)
+			}
+		} else {
+			// register metric based ReactionOnValue
+			if taskList, ok := ts.metrReacts[data.OfMetric]; !ok {
+				ts.metrReacts[data.OfMetric] = []lib.Reaction{data}
+			} else {
+				ts.metrReacts[data.OfMetric] = append(taskList, data)
 			}
 		}
 
-		if taskList, ok := ts.reactions[data.OfTask]; !ok {
-			ts.reactions[data.OfTask] = []lib.Reaction{data}
-		} else {
-			ts.reactions[data.OfTask] = append(taskList, data)
-		}
 	}
 
 	return nil
