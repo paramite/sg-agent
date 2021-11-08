@@ -119,7 +119,7 @@ func TestScheduler(t *testing.T) {
 				},
 			},
 		}
-		assert.Equal(t, react, scheduler.reactions)
+		assert.Equal(t, react, scheduler.taskReacts)
 	})
 
 	t.Run("Test execution request", func(t *testing.T) {
